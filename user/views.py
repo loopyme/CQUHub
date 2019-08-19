@@ -38,7 +38,7 @@ class Login_View(View):
             else:
                 message = "您输入的学号或者密码验证有误"
                 if not user.isActivated:
-                    message = "你是个骗子，你自己干了什么你知道！请你重新注册！！！"
+                    message = "未通过验证:你是个骗子，你自己干了什么你知道！请你重新注册！！！"
                     User_Info.objects.filter(username=user.username).delete()
                 forms = Login()
                 return render(
@@ -54,12 +54,10 @@ class Login_View(View):
 class Verify_View(View):
     def get(self, request):
         username = request.session.get("username", None)
-        if username == None:
+        if username is None:
             raise Http404("You do not have the access to this page")
-        if request.session.get("is sent", None) == None:
-            sender = Sender(username)
-            # print("get: ", self.sender.student_id)
-            sender.send_verify_mail()
+        if request.session.get("is sent", None) is None:
+            Sender.send_verify_mail(username)
             request.session["is sent"] = "True"
         forms = Verify()
         return render(request, "user/verify.html", {"forms": forms})
@@ -71,13 +69,10 @@ class Verify_View(View):
         forms = Verify(request.POST)
         if forms.is_valid():
             code = forms.cleaned_data["veriCode"]
-            sender = Sender(username)
-            # print("post: ", self.sender.student_id)
             # print("user input:", code)
-            result = sender.validate_code(code)
+            user.isActivated = Sender.check_token(username, code)
             # print(result)
-            if result:
-                user.isActivated = True
+            if user.isActivated:
                 user.save()
                 login(request, user)
                 return redirect(to="topic:index")
@@ -100,7 +95,7 @@ class Info_View(View):
         avatar = request.FILES.get("avatar", None)
         forms = Info(request.POST)
         user = User_Info.objects.get(username=username)
-        if avatar != None:
+        if avatar is not None:
             # 获取上传文件的扩展名
             uploadDirPath = os.path.join(os.getcwd(), "staticfiles/avatar")
             if user.avatarID != "defaultAvatar.jpg":

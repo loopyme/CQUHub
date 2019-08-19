@@ -4,14 +4,13 @@ from smtplib import SMTP_SSL
 import time, random
 from my_project.settings import DEBUG, MAIL_PSW
 
-sender_cache = {}
-
 
 class Sender:
-    global sender_cache
-
-    def __init__(self, id="000000", debug=DEBUG):
-        self.content = """
+    __tokens = {}
+    __debug = DEBUG
+    __mail_content = {
+        "title": "CQU Hub的注册验证",
+        "content": """
         您好:
 
             感谢您使用CQU Hub！
@@ -22,53 +21,78 @@ class Sender:
 
         CQU Hub开发组
         {}
-        """
-        self.student_id = id
-        self.debug = debug
+        """,
+    }
+    __mail_config = {
+        "host_server": "smtp.exmail.qq.com",
+        "psw": MAIL_PSW,
+        "sender": "cquhub-no-reply@mail.loopy.tech",
+        "receiver": "{}@cqu.edu.cn",
+    }
 
-    def set_id(self, id):
-        self.student_id = id
+    @classmethod
+    def config(cls, **kwargs):
+        for key in kwargs:
+            if key == "debug":
+                cls.__debug = kwargs[key]
+            elif key in cls.__mail_content.keys():
+                cls.__mail_content[key] = kwargs[key]
+            elif key in cls.__mail_config.keys():
+                cls.__mail_config[key] = kwargs[key]
+            else:
+                raise AttributeError('"Sender" has no attribute called {}'.format(key))
 
-    def generate_token(self):
+    @staticmethod
+    def generate_token(student_id):
         token = str(random.randint(0, 10 ** 6 - 1)).zfill(6)
-        sender_cache[self.student_id] = [token, time.time()]
+        Sender.__tokens[student_id] = [token, time.time()]
         return token
 
-    def validate_code(self, userInputCode):
-        for id in list(sender_cache.keys()):
-            if sender_cache[id][1] - time.time() > 3600:
-                del sender_cache[id]
+    @staticmethod
+    def update_token():
+        for id in list(Sender.__tokens.keys()):
+            if Sender.__tokens[id][1] - time.time() > 3600:
+                # token expired in 6 min
+                del Sender.__tokens[id]
+
+    @staticmethod
+    def check_token(student_id, input_token):
+        Sender.update_token()
         return (
-            self.student_id in sender_cache.keys()
-            and sender_cache[self.student_id][0] == userInputCode
+            student_id in Sender.__tokens.keys()
+            and Sender.__tokens[student_id][0] == input_token
         )
 
-    def send_verify_mail(self):
-        if self.student_id == "000000":
-            raise Exception("Defult student_id detected")
-        if self.debug:
-            print("*" * 79 + "\n" + str(self.generate_token()) + "\n" + "*" * 79)
+    @staticmethod
+    def send_verify_mail(student_id):
+        if Sender.__debug:
+            print("*" * 79 + "\n" + Sender.generate_token(student_id) + "\n" + "*" * 79)
             return
-        host_server = "smtp.exmail.qq.com"
-        pwd = MAIL_PSW
-        sender_mail = "cquhub-no-reply@mail.loopy.tech"
-        receiver = "{}@cqu.edu.cn".format(self.student_id)
-        mail_title = "CQU Hub的注册验证"
-        mail_content = self.content.format(
-            self.student_id,
-            self.generate_token(),
-            time.strftime("%Y-%m-%d %X", time.localtime()),
-        )
 
-        smtp = SMTP_SSL(host_server)
+        smtp = SMTP_SSL(Sender.__mail_config["host_server"])
 
         smtp.set_debuglevel(0)
-        smtp.ehlo(host_server)
-        smtp.login(sender_mail, pwd)
+        smtp.ehlo(Sender.__mail_config["host_server"])
+        smtp.login(Sender.__mail_config["sender"], Sender.__mail_config["psw"])
 
-        msg = MIMEText(mail_content, "plain", "utf-8")
-        msg["Subject"] = Header(mail_title, "utf-8")
-        msg["From"] = sender_mail
-        msg["To"] = receiver
-        smtp.sendmail(sender_mail, receiver, msg.as_string())
+        msg = MIMEText(
+            Sender.__mail_content["content"].format(
+                student_id,
+                Sender.generate_token(student_id),
+                time.strftime("%Y-%m-%d %X", time.localtime()),
+            ),
+            "plain",
+            "utf-8",
+        )
+        msg["Subject"], msg["From"], msg["To"] = (
+            Header(Sender.__mail_content["title"], "utf-8"),
+            Sender.__mail_config["sender"],
+            Sender.__mail_config["receiver"],
+        )
+
+        smtp.sendmail(
+            Sender.__mail_config["sender"],
+            Sender.__mail_config["receiver"],
+            msg.as_string(),
+        )
         smtp.quit()
